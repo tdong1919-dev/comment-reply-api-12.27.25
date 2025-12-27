@@ -4,6 +4,46 @@ const cors = require("cors");
 const app = express();
 app.use(cors());
 app.use(express.json());
+// ===== Meta Webhook Gateway (GET verify + POST forward) =====
+
+// Use an env var if set; otherwise fall back to a hardcoded token for MVP
+const META_VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || "bare_ai_verify_2026";
+
+// GET: Meta verification handshake
+app.get("/meta/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (mode === "subscribe" && token === META_VERIFY_TOKEN) {
+    return res.status(200).send(challenge); // <-- plain text only
+  }
+  return res.sendStatus(403);
+});
+
+// POST: Receive webhook events (Meta) and forward to n8n
+app.post("/meta/webhook", async (req, res) => {
+  // Always ACK fast
+  res.status(200).json({ ok: true });
+
+  try {
+    const N8N_EVENTS_URL = process.env.N8N_EVENTS_URL;
+    if (!N8N_EVENTS_URL) {
+      console.warn("N8N_EVENTS_URL missing; cannot forward.");
+      return;
+    }
+
+    // Node 18+ usually has global fetch. If not, see Step 2.3 below.
+    await fetch(N8N_EVENTS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body),
+    });
+  } catch (err) {
+    console.error("Error forwarding to n8n:", err);
+  }
+});
+
 
 // TEMP: mock tenant store
 const tenantsByPageId = {
